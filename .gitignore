@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual Environment
+venv/
+
+# Audio / Temp files
+*.raw
+*.wav
+debug_mic.raw
+
+# Models
+models/
+
+# System / IDE
+.DS_Store
+.vscode/
+.idea/
+.env
