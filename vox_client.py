@@ -62,6 +62,7 @@ class VoxClientDaemon:
             on_quit=self.shutdown,
             on_edit_prompt=self.edit_prompt,
             on_toggle_save_audio=self.toggle_save_audio,
+            on_toggle_auto_enter=self.toggle_auto_enter,
         )
 
         self.max_retries = 6
@@ -70,7 +71,7 @@ class VoxClientDaemon:
         self.shutdown_lock = threading.Lock()
         self.hotkey_listener = None
         self.overlay_destroyed = False
-        self.initial_prompt = self._load_prompt()
+        self.initial_prompt = config.INITIAL_PROMPT
 
     def _is_autostart_enabled(self) -> bool:
         autostart_file = self._get_autostart_file()
@@ -91,24 +92,10 @@ class VoxClientDaemon:
             "NoDisplay=false\n"
         )
 
-    def _get_prompt_file(self) -> str:
-        return os.path.join(os.path.dirname(os.path.abspath(__file__)), ".prompt")
-
-    def _load_prompt(self) -> str:
-        try:
-            with open(self._get_prompt_file(), "r", encoding="utf-8") as f:
-                return f.read().strip()
-        except FileNotFoundError:
-            return ""
-
     def _save_prompt(self, prompt: str):
-        try:
-            with open(self._get_prompt_file(), "w", encoding="utf-8") as f:
-                f.write(prompt)
-            self.initial_prompt = prompt
-            self.tray.set_initial_prompt(prompt)
-        except Exception as e:
-            logger.error(f"Failed to save prompt: {e}")
+        self.initial_prompt = prompt
+        config.save_menu_settings(initial_prompt=prompt)
+        self.tray.set_initial_prompt(prompt)
 
     def edit_prompt(self):
         import tkinter as tk
@@ -148,12 +135,8 @@ class VoxClientDaemon:
             return
 
         try:
-            root = tk.Tk()
-            root.withdraw()
-            root.clipboard_clear()
-            root.clipboard_append(self.last_transcription)
-            root.update()
-            root.destroy()
+            subprocess.run(['xclip', '-selection', 'clipboard'],
+                           input=self.last_transcription.encode('utf-8'), check=True)
             logger.info("Останній текст скопійовано до буфера обміну")
         except Exception as e:
             logger.error(f"Не вдалося скопіювати до буфера обміну: {e}")
@@ -189,7 +172,7 @@ class VoxClientDaemon:
         if self.language == language:
             return
         self.language = language
-        config.LANGUAGE = language
+        config.save_menu_settings(language=language)
         logger.info(f"Мова розпізнавання змінена на: {language}")
         self.tray.set_language(language)
 
@@ -214,6 +197,11 @@ class VoxClientDaemon:
     def toggle_save_audio(self, enabled: bool):
         self.tray.set_save_audio(enabled)
         logger.info(f"Збереження аудіо {'увімкнено' if enabled else 'вимкнено'}")
+
+    def toggle_auto_enter(self, enabled: bool):
+        config.save_menu_settings(auto_enter=enabled)
+        self.tray.set_auto_enter(enabled)
+        logger.info(f"Auto Enter {'увімкнено' if enabled else 'вимкнено'}")
 
     def check_for_updates(self):
         threading.Thread(target=self._check_for_updates_worker, daemon=True).start()
@@ -489,6 +477,7 @@ class VoxClientDaemon:
         self.tray.set_paused(self.paused)
         self.tray.set_initial_prompt(self.initial_prompt)
         self.tray.set_save_audio(False)
+        self.tray.set_auto_enter(config.AUTO_ENTER)
         self._init_hotkeys()
         self.tray.start()
         logger.info(f"Using VOX_SERVER_URL: {config.SERVER_BASE_URL}")

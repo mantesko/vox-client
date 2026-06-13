@@ -19,4 +19,4 @@ models/
 .vscode/
 .idea/
 .env
-.prompt
+.vox_settings.json

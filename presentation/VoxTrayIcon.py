@@ -23,6 +23,7 @@ class VoxTrayIcon:
         on_quit,
         on_edit_prompt=None,
         on_toggle_save_audio=None,
+        on_toggle_auto_enter=None,
         title="Vox - hands-free voice to text",
     ):
         self.on_toggle_pause = on_toggle_pause
@@ -36,6 +37,7 @@ class VoxTrayIcon:
         self.on_quit = on_quit
         self.on_edit_prompt = on_edit_prompt
         self.on_toggle_save_audio = on_toggle_save_audio
+        self.on_toggle_auto_enter = on_toggle_auto_enter
         self.title = title
 
         self.paused = False
@@ -46,6 +48,7 @@ class VoxTrayIcon:
         self.autostart_enabled = False
         self.initial_prompt = ""
         self.save_audio = False
+        self.auto_enter = True
         self.state = "listening"
 
         self.icon = None
@@ -120,6 +123,10 @@ class VoxTrayIcon:
         self.save_audio = enabled
         self._refresh_menu()
 
+    def set_auto_enter(self, enabled: bool):
+        self.auto_enter = enabled
+        self._refresh_menu()
+
     def _refresh_icon(self):
         self.current_image = self._generate_icon_image()
         if self.icon:
@@ -166,6 +173,12 @@ class VoxTrayIcon:
         self._refresh_menu()
         if self.on_toggle_save_audio:
             self.on_toggle_save_audio(self.save_audio)
+
+    def _toggle_auto_enter_action(self, icon=None, item=None):
+        self.auto_enter = not self.auto_enter
+        self._refresh_menu()
+        if self.on_toggle_auto_enter:
+            self.on_toggle_auto_enter(self.auto_enter)
 
     def _check_updates_action(self, icon=None, item=None):
         if self.on_check_updates:
@@ -221,6 +234,7 @@ class VoxTrayIcon:
             Menu.SEPARATOR,
             item("Start on Boot", self._toggle_autostart_action, checked=lambda i: self.autostart_enabled),
             item("Save Audio", self._toggle_save_audio_action, checked=lambda i: self.save_audio),
+            item("Auto Enter", self._toggle_auto_enter_action, checked=lambda i: self.auto_enter),
             item("Check for Updates", self._check_updates_action),
             Menu.SEPARATOR,
             item("About", self._about_action),
