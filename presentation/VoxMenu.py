@@ -4,6 +4,7 @@ from typing import Callable, List, Dict, Any, Optional
 
 logger = logging.getLogger("VoxMenu")
 
+
 class VoxMenu(tk.Toplevel):
     def __init__(self, parent, title="Vox - Hands-Free", on_action: Callable = None):
         super().__init__(parent)
@@ -26,15 +27,8 @@ class VoxMenu(tk.Toplevel):
 
         self.bind("<Escape>", lambda e: self.hide())
 
-        self._outside_click_bind_id = None
-        self._root_click_bind_id = None
         self._poll_after_id = None
-
-    def _on_outside_click(self, event):
-        """Приховує меню, якщо клік відбувся поза його межами."""
-        if not (self.winfo_rootx() <= event.x_root <= self.winfo_rootx() + self.winfo_width() and
-                self.winfo_rooty() <= event.y_root <= self.winfo_rooty() + self.winfo_height()):
-            self.hide()
+        self._clicked_inside = False
 
     def set_data(self, menu_data: List[Dict]):
         """
@@ -116,12 +110,31 @@ class VoxMenu(tk.Toplevel):
                 lbl_text.bind("<Leave>", on_leave)
                 lbl_indicator.bind("<Leave>", on_leave)
 
+                def make_click_record(f, li, lt):
+                    def handler(e):
+                        self._clicked_inside = True
+                    f.bind("<Button-1>", handler)
+                    li.bind("<Button-1>", handler)
+                    lt.bind("<Button-1>", handler)
+
+                make_click_record(frame, lbl_indicator, lbl_text)
+
                 if submenu:
-                    frame.bind("<Button-1>", lambda e, s=submenu: self._go_to_submenu(s))
-                    lbl_text.bind("<Button-1>", lambda e, s=submenu: self._go_to_submenu(s))
+                    def make_submenu_handler(s):
+                        def handler(e):
+                            self._clicked_inside = True
+                            self._go_to_submenu(s)
+                        return handler
+                    sh = make_submenu_handler(submenu)
+                    frame.bind("<Button-1>", sh)
+                    lbl_text.bind("<Button-1>", sh)
                 elif callback:
                     def make_click_handler(c):
-                        return lambda e: [self.hide(), c()]
+                        def handler(e):
+                            self._clicked_inside = True
+                            self.hide()
+                            c()
+                        return handler
 
                     handler = make_click_handler(callback)
                     frame.bind("<Button-1>", handler)
@@ -146,13 +159,11 @@ class VoxMenu(tk.Toplevel):
         self.geometry(f"+{x}+{y}")
         self.deiconify()
         self.lift()
+        self.update_idletasks()
         self.focus_force()
 
-        root = self.winfo_toplevel()
-        if self._outside_click_bind_id is None:
-            self._outside_click_bind_id = root.bind("<Button-1>", self._on_outside_click, add="+")
-        if self._root_click_bind_id is None:
-            self._root_click_bind_id = root.bind("<FocusOut>", lambda e: self.after(50, self.hide), add="+")
+        self._clicked_inside = False
+
         self._start_poll()
 
     def _start_poll(self):
@@ -163,15 +174,22 @@ class VoxMenu(tk.Toplevel):
     def _poll_focus(self):
         if not self.winfo_ismapped():
             return
-        try:
-            focused = self.focus_get()
-            if focused is None:
+
+        mx = self.winfo_pointerx()
+        my = self.winfo_pointery()
+        x1 = self.winfo_rootx()
+        y1 = self.winfo_rooty()
+        x2 = x1 + self.winfo_width()
+        y2 = y1 + self.winfo_height()
+
+        if not (x1 <= mx <= x2 and y1 <= my <= y2):
+            if self._clicked_inside:
                 self.hide()
                 return
-        except KeyError:
-            self.hide()
-            return
-        self._poll_after_id = self.after(200, self._poll_focus)
+        else:
+            self._clicked_inside = True
+
+        self._poll_after_id = self.after(100, self._poll_focus)
 
     def hide(self):
         if not self.winfo_ismapped():
@@ -182,14 +200,6 @@ class VoxMenu(tk.Toplevel):
         if self._poll_after_id is not None:
             self.after_cancel(self._poll_after_id)
             self._poll_after_id = None
-
-        root = self.winfo_toplevel()
-        if self._outside_click_bind_id is not None:
-            root.unbind("<Button-1>", self._outside_click_bind_id)
-            self._outside_click_bind_id = None
-        if self._root_click_bind_id is not None:
-            root.unbind("<FocusOut>", self._root_click_bind_id)
-            self._root_click_bind_id = None
 
         self.withdraw()
         if self.parent:
