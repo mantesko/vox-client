@@ -25,7 +25,6 @@ from infrastructure.SoundDeviceMicrophone import MicrophoneManager
 from presentation.TranscriptionOverlay import TranscriptionOverlay
 from infrastructure.X11TextInjector import TextInjector
 from presentation.VoxTrayIcon import VoxTrayIcon
-from presentation.VoxMenu import VoxMenu
 
 from config import LOG_LEVEL
 
@@ -40,7 +39,6 @@ class VoxClientDaemon:
         self.injector = TextInjector()
         self.audio = MicrophoneManager()
         self.overlay = TranscriptionOverlay(self.audio)
-        self.tray_menu = VoxMenu(self.overlay.root)
         self.ui_queue = queue.Queue()
 
         self.paused = False
@@ -64,7 +62,6 @@ class VoxClientDaemon:
             on_quit=self.shutdown,
             on_edit_prompt=self.edit_prompt,
             on_toggle_save_audio=self.toggle_save_audio,
-            show_custom_menu_callback=self.show_tray_menu,
         )
 
         self.max_retries = 6
@@ -74,10 +71,6 @@ class VoxClientDaemon:
         self.hotkey_listener = None
         self.overlay_destroyed = False
         self.initial_prompt = self._load_prompt()
-
-    def show_tray_menu(self, menu_data):
-        """Ставить команду показу меню в чергу для виконання у головному потоці."""
-        self.ui_queue.put(menu_data)
 
     def _is_autostart_enabled(self) -> bool:
         autostart_file = self._get_autostart_file()
@@ -506,20 +499,14 @@ class VoxClientDaemon:
             logger.info("HTTP transcription mode enabled")
         try:
             while not self.stop_event.is_set():
-                # Обробка черги UI команд
                 try:
                     while not self.ui_queue.empty():
                         item = self.ui_queue.get_nowait()
                         if isinstance(item, tuple) and item[0] == "dialog":
                             item[1]()
-                        else:
-                            menu_data = item
-                            x, y = self.overlay.root.winfo_pointerxy()
-                            self.tray_menu.set_data(menu_data)
-                            self.tray_menu.show(x, y)
                 except queue.Empty:
                     pass
-                
+
                 self.overlay.run_step()
                 time.sleep(0.01)
         except KeyboardInterrupt:

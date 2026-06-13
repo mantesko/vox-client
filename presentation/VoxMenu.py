@@ -1,8 +1,37 @@
 import tkinter as tk
 import logging
+import ctypes
+import ctypes.util
 from typing import Callable, List, Dict, Any, Optional
 
 logger = logging.getLogger("VoxMenu")
+
+
+def _init_x11():
+    try:
+        xlib = ctypes.CDLL(ctypes.util.find_library("X11"))
+        xlib.XOpenDisplay.argtypes = [ctypes.c_char_p]
+        xlib.XOpenDisplay.restype = ctypes.c_void_p
+        dpy = xlib.XOpenDisplay(None)
+        if not dpy:
+            return None, None
+
+        xlib.XGetInputFocus.argtypes = [
+            ctypes.c_void_p,
+            ctypes.POINTER(ctypes.c_ulong),
+            ctypes.POINTER(ctypes.c_int),
+        ]
+        xlib.XGetInputFocus.restype = ctypes.c_int
+        return xlib, dpy
+    except Exception:
+        return None, None
+
+
+def _get_x11_focus_window(xlib, dpy) -> int:
+    focus_return = ctypes.c_ulong()
+    revert_to = ctypes.c_int()
+    xlib.XGetInputFocus(dpy, ctypes.byref(focus_return), ctypes.byref(revert_to))
+    return focus_return.value
 
 
 class VoxMenu(tk.Toplevel):
@@ -11,31 +40,30 @@ class VoxMenu(tk.Toplevel):
         self.parent = parent
         self.overrideredirect(True)
         self.attributes("-topmost", True)
-        self.configure(bg="#061426", bd=1, highlightbackground="#1e2d3d", highlightthickness=1)
+        self.configure(bg="#ffffff", bd=0, highlightthickness=0)
         self.withdraw()
 
         self.title_text = title
         self.current_menu_data = []
-        self.menu_stack = []  # Для навігації підменю
+        self.menu_stack = []
 
-        self.bg = "#061426"
-        self.hover_bg = "#1c2c3e"
-        self.fg = "#ffffff"
-        self.accent = "#8df2ff"
-        self.disabled_fg = "#555555"
-        self.separator_color = "#1e2d3d"
+        self._menu_bg = "#ffffff"
+        self._hover_bg = "#f0f0f0"
+        self._fg = "#1a1a1a"
+        self._disabled_fg = "#999999"
+        self._separator_color = "#e0e0e0"
+        self._accent = "#2196F3"
 
         self.bind("<Escape>", lambda e: self.hide())
 
         self._poll_after_id = None
-        self._clicked_inside = False
+        self._my_focus_wid = None
+        self._xlib, self._x11_dpy = _init_x11()
+
+        self._click_listener = None
+        self._click_listener_active = False
 
     def set_data(self, menu_data: List[Dict]):
-        """
-        Встановлює дані меню.
-        menu_data: Список словників:
-        { "label": str, "callback": func, "checked": bool, "enabled": bool, "submenu": List[Dict], "separator": bool }
-        """
         self.current_menu_data = menu_data
         self.menu_stack = []
 
@@ -52,95 +80,120 @@ class VoxMenu(tk.Toplevel):
         for widget in self.winfo_children():
             widget.destroy()
 
-        # Header
-        header_frame = tk.Frame(self, bg=self.bg)
-        header_frame.pack(fill="x")
+        tk.Frame(self, bg=self._menu_bg, height=6).pack(fill="x")
 
         if self.menu_stack:
-            back_btn = tk.Label(header_frame, text=" ← ", bg=self.bg, fg=self.accent, font=("Sans", 11, "bold"), cursor="hand2")
-            back_btn.pack(side="left", padx=5)
+            back_frame = tk.Frame(self, bg=self._menu_bg)
+            back_frame.pack(fill="x", padx=10, pady=(2, 0))
+            back_btn = tk.Label(back_frame, text="\u2190", bg=self._menu_bg, fg=self._accent,
+                                font=("Sans", 12, "bold"), cursor="hand2", padx=4)
+            back_btn.pack(side="left")
             back_btn.bind("<Button-1>", lambda e: self._go_back())
-
-        title_lbl = tk.Label(header_frame, text=self.title_text, bg=self.bg, fg=self.accent, font=("Sans", 9, "bold"), pady=10)
-        title_lbl.pack(side="left", fill="x", expand=True)
-
-        tk.Frame(self, height=1, bg=self.separator_color).pack(fill="x", padx=5)
 
         data = self.menu_stack[-1] if self.menu_stack else self.current_menu_data
 
-        for item in data:
-            if item.get("separator"):
-                tk.Frame(self, height=1, bg=self.separator_color).pack(fill="x", padx=5, pady=4)
+        for menu_item in data:
+            if menu_item.get("separator"):
+                sep_wrapper = tk.Frame(self, bg=self._menu_bg)
+                sep_wrapper.pack(fill="x")
+                tk.Frame(sep_wrapper, bg=self._separator_color, height=1).pack(fill="x", padx=12, pady=4)
                 continue
 
-            frame = tk.Frame(self, bg=self.bg)
-            frame.pack(fill="x")
+            frame = tk.Frame(self, bg=self._menu_bg, cursor="hand2")
+            frame.pack(fill="x", padx=8, pady=1)
 
-            label = item.get("label", "")
-            checked = item.get("checked", False)
-            enabled = item.get("enabled", True)
-            submenu = item.get("submenu")
-            callback = item.get("callback")
+            label = menu_item.get("label", "")
+            checked = menu_item.get("checked", False)
+            enabled = menu_item.get("enabled", True)
+            submenu = menu_item.get("submenu")
+            callback = menu_item.get("callback")
 
-            indicator_text = "●" if checked else " "
-            suffix = "  ›" if submenu else ""
+            inner = tk.Frame(frame, bg=self._menu_bg)
+            inner.pack(fill="x", padx=8, pady=5)
 
-            lbl_indicator = tk.Label(frame, text=f" {indicator_text} ", bg=self.bg, fg=self.accent if checked else self.bg, font=("Sans", 10))
-            lbl_indicator.pack(side="left")
+            if checked:
+                lbl_check = tk.Label(inner, text="\u2713", bg=self._menu_bg, fg=self._accent,
+                                     font=("Sans", 11), width=2, anchor="w")
+                lbl_check.pack(side="left")
 
-            lbl_text = tk.Label(frame, text=f"{label}{suffix}", bg=self.bg, fg=self.fg if enabled else self.disabled_fg,
-                                anchor="w", padx=5, pady=7, font=("Sans", 10))
+            lbl_text = tk.Label(inner, text=label, bg=self._menu_bg,
+                                fg=self._fg if enabled else self._disabled_fg,
+                                anchor="w", font=("Sans", 10), padx=4)
             lbl_text.pack(side="left", fill="x", expand=True)
 
+            if submenu:
+                lbl_arrow = tk.Label(inner, text="\u203a", bg=self._menu_bg, fg=self._disabled_fg,
+                                     font=("Sans", 14))
+                lbl_arrow.pack(side="right")
+
             if enabled:
-                def make_on_enter(f, li, lt):
-                    return lambda e: [f.configure(bg=self.hover_bg), li.configure(bg=self.hover_bg), lt.configure(bg=self.hover_bg)]
+                def make_enter(f):
+                    return lambda e: f.configure(bg=self._hover_bg)
 
-                def make_on_leave(f, li, lt):
-                    return lambda e: [f.configure(bg=self.bg), li.configure(bg=self.bg), lt.configure(bg=self.bg)]
+                def make_leave(f):
+                    return lambda e: f.configure(bg=self._menu_bg)
 
-                on_enter = make_on_enter(frame, lbl_indicator, lbl_text)
-                on_leave = make_on_leave(frame, lbl_indicator, lbl_text)
-
-                frame.bind("<Enter>", on_enter)
-                lbl_text.bind("<Enter>", on_enter)
-                lbl_indicator.bind("<Enter>", on_enter)
-
-                frame.bind("<Leave>", on_leave)
-                lbl_text.bind("<Leave>", on_leave)
-                lbl_indicator.bind("<Leave>", on_leave)
-
-                def make_click_record(f, li, lt):
-                    def handler(e):
-                        self._clicked_inside = True
-                    f.bind("<Button-1>", handler)
-                    li.bind("<Button-1>", handler)
-                    lt.bind("<Button-1>", handler)
-
-                make_click_record(frame, lbl_indicator, lbl_text)
+                for w in [frame, inner, lbl_text]:
+                    w.bind("<Enter>", make_enter(frame))
+                    w.bind("<Leave>", make_leave(frame))
 
                 if submenu:
-                    def make_submenu_handler(s):
-                        def handler(e):
-                            self._clicked_inside = True
-                            self._go_to_submenu(s)
-                        return handler
-                    sh = make_submenu_handler(submenu)
-                    frame.bind("<Button-1>", sh)
-                    lbl_text.bind("<Button-1>", sh)
+                    def make_sub(s):
+                        return lambda e: self._go_to_submenu(s)
+                    h = make_sub(submenu)
+                    for w in [frame, inner, lbl_text]:
+                        w.bind("<Button-1>", h)
                 elif callback:
-                    def make_click_handler(c):
+                    def make_cb(c):
                         def handler(e):
-                            self._clicked_inside = True
                             self.hide()
                             c()
                         return handler
+                    h = make_cb(callback)
+                    for w in [frame, inner, lbl_text]:
+                        w.bind("<Button-1>", h)
 
-                    handler = make_click_handler(callback)
-                    frame.bind("<Button-1>", handler)
-                    lbl_text.bind("<Button-1>", handler)
+        tk.Frame(self, bg=self._menu_bg, height=6).pack(fill="x")
 
         self.update_idletasks()
+
+    def _start_click_listener(self):
+        if self._click_listener_active:
+            return
+
+        def on_click(x, y, button, pressed):
+            if not pressed:
+                return
+            if not self.winfo_ismapped():
+                return
+
+            mx1 = self.winfo_rootx()
+            my1 = self.winfo_rooty()
+            mx2 = mx1 + self.winfo_width()
+            my2 = my1 + self.winfo_height()
+
+            if not (mx1 <= x <= mx2 and my1 <= y <= my2):
+                self.after(0, self.hide)
+
+        try:
+            from pynput import mouse
+            self._click_listener = mouse.Listener(on_click=on_click)
+            self._click_listener.daemon = True
+            self._click_listener.start()
+            self._click_listener_active = True
+        except ImportError:
+            logger.warning("pynput not available, click-outside detection limited")
+        except Exception as e:
+            logger.warning(f"Failed to start click listener: {e}")
+
+    def _stop_click_listener(self):
+        if self._click_listener:
+            try:
+                self._click_listener.stop()
+            except Exception:
+                pass
+            self._click_listener = None
+            self._click_listener_active = False
 
     def show(self, x, y):
         self._render()
@@ -162,8 +215,9 @@ class VoxMenu(tk.Toplevel):
         self.update_idletasks()
         self.focus_force()
 
-        self._clicked_inside = False
+        self._my_focus_wid = _get_x11_focus_window(self._xlib, self._x11_dpy) if self._xlib else None
 
+        self._start_click_listener()
         self._start_poll()
 
     def _start_poll(self):
@@ -173,21 +227,23 @@ class VoxMenu(tk.Toplevel):
 
     def _poll_focus(self):
         if not self.winfo_ismapped():
+            self._stop_click_listener()
             return
 
-        mx = self.winfo_pointerx()
-        my = self.winfo_pointery()
-        x1 = self.winfo_rootx()
-        y1 = self.winfo_rooty()
-        x2 = x1 + self.winfo_width()
-        y2 = y1 + self.winfo_height()
-
-        if not (x1 <= mx <= x2 and y1 <= my <= y2):
-            if self._clicked_inside:
+        if self._xlib:
+            current_focus = _get_x11_focus_window(self._xlib, self._x11_dpy)
+            if self._my_focus_wid and current_focus != self._my_focus_wid:
                 self.hide()
                 return
         else:
-            self._clicked_inside = True
+            try:
+                focused = self.focus_get()
+                if focused is None:
+                    self.hide()
+                    return
+            except KeyError:
+                self.hide()
+                return
 
         self._poll_after_id = self.after(100, self._poll_focus)
 
@@ -201,6 +257,7 @@ class VoxMenu(tk.Toplevel):
             self.after_cancel(self._poll_after_id)
             self._poll_after_id = None
 
+        self._stop_click_listener()
         self.withdraw()
         if self.parent:
             self.parent.focus_force()
