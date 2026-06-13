@@ -20,3 +20,4 @@ models/
 .idea/
 .env
 .vox_settings.json
+.mimocode/
