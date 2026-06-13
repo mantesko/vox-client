@@ -5,7 +5,7 @@ import config
 
 logger = logging.getLogger("VoxInjector")
 
-TERMINAL_WM_CLASSES = {"gnome-terminal", "konsole", "alacritty", "kitty", "xterm", "urxvt", "tilix", "st", "terminator", "yakuake", "wezterm", "foot"}
+TERMINAL_WM_CLASSES = {"gnome-terminal", "gnome-terminal-server", "konsole", "alacritty", "kitty", "xterm", "urxvt", "tilix", "st", "terminator", "yakuake", "wezterm", "foot"}
 
 
 class TextInjector:
@@ -42,8 +42,11 @@ class TextInjector:
                 ["xprop", "-id", wid, "WM_CLASS"],
                 stderr=subprocess.DEVNULL, timeout=2
             ).decode()
-            wm_class = wm_class.lower()
-            return any(cls in wm_class for cls in TERMINAL_WM_CLASSES)
+            for part in wm_class.split('"'):
+                part = part.strip().lower()
+                if part and part in TERMINAL_WM_CLASSES:
+                    return True
+            return False
         except Exception:
             return False
 

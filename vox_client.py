@@ -10,7 +10,6 @@ import wave
 import logging
 import threading
 import subprocess
-import webbrowser
 import tkinter as tk
 from tkinter import messagebox
 from urllib import error, request as urlrequest
@@ -24,7 +23,7 @@ import config
 from infrastructure.SoundDeviceMicrophone import MicrophoneManager
 from presentation.TranscriptionOverlay import TranscriptionOverlay
 from infrastructure.X11TextInjector import TextInjector
-from presentation.VoxTrayIcon import VoxTrayIcon
+from presentation.tray import VoxTrayIcon
 
 from config import LOG_LEVEL
 
@@ -54,13 +53,9 @@ class VoxClientDaemon:
             on_toggle_pause=self.toggle_pause,
             on_copy_last_text=self.copy_last_text,
             on_open_preferences=self.open_preferences,
-            on_audio_device_change=self.change_audio_device,
-            on_language_change=self.change_language,
             on_toggle_autostart=self.toggle_autostart,
-            on_check_updates=self.check_for_updates,
             on_about=self.show_about,
             on_quit=self.shutdown,
-            on_edit_prompt=self.edit_prompt,
             on_toggle_save_audio=self.toggle_save_audio,
             on_toggle_auto_enter=self.toggle_auto_enter,
         )
@@ -92,30 +87,21 @@ class VoxClientDaemon:
             "NoDisplay=false\n"
         )
 
-    def _save_prompt(self, prompt: str):
-        self.initial_prompt = prompt
-        config.save_menu_settings(initial_prompt=prompt)
-        self.tray.set_initial_prompt(prompt)
+    def open_preferences(self):
+        from presentation.PreferencesDialog import PreferencesDialog
 
-    def edit_prompt(self):
-        import tkinter as tk
-        from tkinter import simpledialog
+        def _on_save(settings):
+            self.language = settings["language"]
+            self.initial_prompt = settings["initial_prompt"]
+            numeric_level = getattr(logging, settings["log_level"].upper(), logging.INFO)
+            logging.getLogger().setLevel(numeric_level)
+            logger.info(f"Preferences applied: language={settings['language']}, log_level={settings['log_level']}")
 
-        def _show_dialog():
-            root = tk.Tk()
-            root.withdraw()
-            current = self.initial_prompt or ""
-            prompt = simpledialog.askstring(
-                "Vox - Initial Prompt",
-                "Enter initial prompt for Whisper.\nThis helps recognize Ukrainian and technical terms:",
-                initialvalue=current,
-                parent=root,
-            )
-            root.destroy()
-            if prompt is not None:
-                self._save_prompt(prompt.strip())
+        def _show():
+            dialog = PreferencesDialog(on_save=_on_save)
+            dialog.show()
 
-        self.ui_queue.put(("dialog", _show_dialog))
+        self.ui_queue.put(("dialog", _show))
 
     def toggle_pause(self, paused: bool):
         self.paused = paused
@@ -141,41 +127,6 @@ class VoxClientDaemon:
         except Exception as e:
             logger.error(f"Не вдалося скопіювати до буфера обміну: {e}")
 
-    def open_preferences(self):
-        preferences_path = os.path.join(os.path.dirname(__file__), "README.md")
-        if not os.path.exists(preferences_path):
-            preferences_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-
-        try:
-            if sys.platform.startswith("linux"):
-                subprocess.Popen(["xdg-open", preferences_path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            elif sys.platform == "darwin":
-                subprocess.Popen(["open", preferences_path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            elif sys.platform == "win32":
-                os.startfile(preferences_path)
-            else:
-                logger.info("Open preferences is not supported on this platform.")
-        except Exception as e:
-            logger.error(f"Не вдалося відкрити налаштування: {e}")
-
-    def change_audio_device(self, device):
-        if self.audio.device == device:
-            return
-        logger.info(f"Вибрано аудіопристрій: {device}")
-        try:
-            self.audio.set_input_device(device)
-            self.tray.set_audio_devices(self.audio.list_input_devices(), self.audio.device)
-        except Exception as e:
-            logger.error(f"Не вдалося встановити аудіопристрій: {e}")
-
-    def change_language(self, language):
-        if self.language == language:
-            return
-        self.language = language
-        config.save_menu_settings(language=language)
-        logger.info(f"Мова розпізнавання змінена на: {language}")
-        self.tray.set_language(language)
-
     def toggle_autostart(self, enabled: bool):
         autostart_file = self._get_autostart_file()
         try:
@@ -199,12 +150,9 @@ class VoxClientDaemon:
         logger.info(f"Збереження аудіо {'увімкнено' if enabled else 'вимкнено'}")
 
     def toggle_auto_enter(self, enabled: bool):
-        config.save_menu_settings(auto_enter=enabled)
+        config.save_settings(auto_enter=enabled)
         self.tray.set_auto_enter(enabled)
         logger.info(f"Auto Enter {'увімкнено' if enabled else 'вимкнено'}")
-
-    def check_for_updates(self):
-        threading.Thread(target=self._check_for_updates_worker, daemon=True).start()
 
     def _normalize_remote_url(self, url: str) -> str:
         if url.startswith("git@github.com:"):
@@ -212,35 +160,6 @@ class VoxClientDaemon:
         if url.startswith("git://"):
             return url.replace("git://", "https://")
         return url
-
-    def _check_for_updates_worker(self):
-        repo_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        try:
-            remote_url = subprocess.check_output(
-                ["git", "-C", repo_dir, "remote", "get-url", "origin"],
-                stderr=subprocess.DEVNULL,
-                text=True,
-            ).strip()
-            local_hash = subprocess.check_output(
-                ["git", "-C", repo_dir, "rev-parse", "HEAD"],
-                stderr=subprocess.DEVNULL,
-                text=True,
-            ).strip()
-            remote_hash = subprocess.check_output(
-                ["git", "-C", repo_dir, "ls-remote", "origin", "HEAD"],
-                stderr=subprocess.DEVNULL,
-                text=True,
-            ).split()[0]
-
-            if local_hash == remote_hash:
-                logger.info("Оновлення не потрібні: програма вже актуальна.")
-            else:
-                logger.info("Доступне оновлення. Відкриваю сторінку репозиторію...")
-                url = self._normalize_remote_url(remote_url)
-                if url:
-                    webbrowser.open(url)
-        except Exception as e:
-            logger.warning(f"Не вдалося перевірити оновлення: {e}")
 
     def show_about(self):
         repo_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -258,14 +177,13 @@ class VoxClientDaemon:
         except Exception:
             pass
 
-        try:
+        def _show_dialog():
             root = tk.Tk()
             root.withdraw()
             messagebox.showinfo("About Vox", message)
             root.destroy()
-        except Exception as e:
-            logger.info(message)
-            logger.warning(f"Не вдалося показати вікно About: {e}")
+
+        self.ui_queue.put(("dialog", _show_dialog))
 
     def _build_wav_bytes(self, audio_bytes: bytes) -> bytes:
         buffer = io.BytesIO()
@@ -292,8 +210,7 @@ class VoxClientDaemon:
             ).encode("utf-8")
 
         body = (
-            field("model", config.WHISPER_MODEL)
-            + field("language", self.language)
+            field("language", self.language)
             + (
                 f"--{boundary}\r\n"
                 f'Content-Disposition: form-data; name="file"; filename="audio.wav"\r\n'
@@ -370,7 +287,6 @@ class VoxClientDaemon:
                 ws.send(json.dumps({
                     "type": "start",
                     "language": self.language,
-                    "model": config.WHISPER_MODEL,
                     "api_key": getattr(config, "API_KEY", ""),
                     "initial_prompt": self.initial_prompt or getattr(config, "INITIAL_PROMPT", "") or None
                 }))
@@ -471,11 +387,8 @@ class VoxClientDaemon:
 
     def run(self):
         # self.audio.start() -- видалено, запуск динамічний
-        self.tray.set_audio_devices(self.audio.list_input_devices(), self.audio.device)
-        self.tray.set_language(self.language)
         self.tray.set_autostart(self.autostart_enabled)
         self.tray.set_paused(self.paused)
-        self.tray.set_initial_prompt(self.initial_prompt)
         self.tray.set_save_audio(False)
         self.tray.set_auto_enter(config.AUTO_ENTER)
         self._init_hotkeys()
@@ -525,7 +438,7 @@ class VoxClientDaemon:
                     logger.warning(f"Failed to join recording thread: {e}")
             self.audio.stop()
             self.tray.stop()
-            if self.tray.thread and self.tray.thread.is_alive():
+            if self.tray.thread and self.tray.thread.is_alive() and self.tray.thread is not threading.current_thread():
                 try:
                     self.tray.thread.join(timeout=2.0)
                 except Exception as e:
