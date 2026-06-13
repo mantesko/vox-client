@@ -101,6 +101,9 @@ class MicrophoneManager:
 
     def start(self):
         # 16кГц, моно, int16 - стандарт для Whisper
+        if self.stream is not None:
+            return
+            
         try:
             stream_kwargs = {
                 'samplerate': self.sample_rate,
@@ -129,6 +132,8 @@ class MicrophoneManager:
                 logger.error(f"Error stopping stream: {e}")
             finally:
                 self.stream = None
+        self.clear_queues()
+        self._set_last_level(0.0)
 
     def clear_queues(self):
         while not self.server_queue.empty():
