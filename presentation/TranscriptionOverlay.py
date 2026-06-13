@@ -6,6 +6,22 @@ import time
 
 logger = logging.getLogger("VoxOverlay")
 
+BG = "#0c1020"
+
+
+def _hex(r, g, b):
+    return f"#{max(0, min(255, r)):02x}{max(0, min(255, g)):02x}{max(0, min(255, b)):02x}"
+
+
+WAVE_COLORS = [
+    (88, 130, 255),
+    (180, 90, 255),
+    (255, 80, 180),
+]
+
+DOT_COLOR = (120, 180, 255)
+
+
 class TranscriptionOverlay:
     def __init__(self, audio_manager=None):
         self.audio_manager = audio_manager
@@ -13,122 +29,69 @@ class TranscriptionOverlay:
         self.canvas = None
         self.cmd_queue = queue.Queue()
         self.visible = False
-        self.animation_enabled = False
         self.mode = "waveform"
-        self.bar_items = []
-        self.processing_items = []
-        self.center_item = None
-        self.bar_count = 23
-        self.bar_width = 8
-        self.bar_spacing = 6
-        self.bar_min_height = 10
-        self.bar_amplitude = 50
-        self.processing_nodes = 16
-        self.processing_radius = 30
-        self.processing_spread = 24
-        self.animation_speed = 4.0
-        self.idle_level = 0.06
+        self.idle_level = 0.04
+
+        self.size = 90
+        self.cy = self.size // 2
+
+        self.wave_lines = []
+        self.wave_points = 40
+        self.wave_w = int(self.size * 0.6)
+        self.wave_start_x = (self.size - self.wave_w) // 2
+
+        self.dot_count = 3
+        self.dot_items = []
+        self.dot_base_r = 5
+        self.dot_spacing = 16
+
         self._init_window()
 
     def _init_window(self):
         self.root = tk.Tk()
         self.root.overrideredirect(True)
-        self.root.attributes("-alpha", 0.95)
         self.root.attributes("-topmost", True)
-        self.root.configure(bg="#061426")
+        self.root.configure(bg=BG)
+        self.root.attributes("-alpha", 0.0)
 
-        width = self.bar_count * self.bar_width + (self.bar_count + 1) * self.bar_spacing
-        height = 110
-        x = (self.root.winfo_screenwidth() - width) // 2
-        y = 24
-        self.root.geometry(f"{width}x{height}+{x}+{y}")
+        x = (self.root.winfo_screenwidth() - self.size) // 2
+        y = 16
+        self.root.geometry(f"{self.size}x{self.size}+{x}+{y}")
 
-        self.canvas = tk.Canvas(self.root, width=width, height=height, bg="#061426", highlightthickness=0)
-        self.canvas.pack(fill="both", expand=True)
-
-        center_x = width // 2
-        center_y = height // 2
-
-        for index in range(self.bar_count):
-            x0 = self.bar_spacing + index * (self.bar_width + self.bar_spacing) + self.bar_width // 2
-            y0 = center_y - self.bar_min_height
-            y1 = center_y + self.bar_min_height
-            bar = self.canvas.create_line(
-                x0, y0, x0, y1,
-                fill="#ffffff",
-                width=self.bar_width,
-                capstyle="round",
-                state="normal"
-            )
-            self.bar_items.append(bar)
-
-        self.center_item = self.canvas.create_oval(
-            center_x - 18, center_y - 18,
-            center_x + 18, center_y + 18,
-            outline="",
-            fill="#8df2ff",
-            state="hidden"
+        self.canvas = tk.Canvas(
+            self.root, width=self.size, height=self.size,
+            bg=BG, highlightthickness=0,
         )
+        self.canvas.pack()
 
-        for index in range(self.processing_nodes):
-            node = self.canvas.create_oval(
-                center_x, center_y,
-                center_x + 6, center_y + 6,
-                fill="#ffffff",
-                outline="",
-                state="hidden"
+        # ── Wave lines (recording) ─────────────────────
+        for color in WAVE_COLORS:
+            coords = []
+            for i in range(self.wave_points + 1):
+                px = self.wave_start_x + i * (self.wave_w / self.wave_points)
+                coords.extend([px, self.cy])
+            line = self.canvas.create_line(
+                *coords,
+                fill=_hex(*color), width=2,
+                smooth=True, state="hidden",
             )
-            self.processing_items.append(node)
+            self.wave_lines.append(line)
+
+        # ── Dots (processing) ──────────────────────────
+        total_dots_w = (self.dot_count - 1) * self.dot_spacing
+        dot_start_x = (self.size - total_dots_w) // 2
+        for i in range(self.dot_count):
+            dx = dot_start_x + i * self.dot_spacing
+            dot = self.canvas.create_oval(
+                dx - self.dot_base_r, self.cy - self.dot_base_r,
+                dx + self.dot_base_r, self.cy + self.dot_base_r,
+                fill=_hex(*DOT_COLOR), outline="", state="hidden",
+            )
+            self.dot_items.append(dot)
 
         self.root.withdraw()
 
-    def _update_waveform(self):
-        height = int(self.root.winfo_height())
-        center = height // 2
-        t = time.time() * self.animation_speed
-        level = self.idle_level
-        if self.audio_manager:
-            level = max(self.idle_level, self.audio_manager.get_last_level())
-
-        for index, item in enumerate(self.bar_items):
-            phase = t + index * 0.38
-            value = (math.sin(phase) + 1) / 2
-            bar_height = self.bar_min_height + value * self.bar_amplitude * level
-            y0 = center - bar_height
-            y1 = center + bar_height
-            x = self.bar_spacing + index * (self.bar_width + self.bar_spacing) + self.bar_width // 2
-            self.canvas.coords(item, x, y0, x, y1)
-            brightness = int(180 + 75 * level)
-            self.canvas.itemconfig(item, fill=f"#{brightness:02x}{brightness:02x}{brightness:02x}")
-
-    def _update_processing(self):
-        width = int(self.root.winfo_width())
-        height = int(self.root.winfo_height())
-        center_x = width // 2
-        center_y = height // 2
-        t = time.time() * (self.animation_speed * 0.6)
-        level = self.idle_level
-        if self.audio_manager:
-            level = max(self.idle_level, self.audio_manager.get_last_level())
-
-        glow = 18 + 8 * math.sin(t * 1.1)
-        self.canvas.coords(
-            self.center_item,
-            center_x - glow, center_y - glow,
-            center_x + glow, center_y + glow
-        )
-        self.canvas.itemconfig(self.center_item, fill=f"#{int(140 + level * 90):02x}{int(220 - level * 40):02x}{255:02x}")
-
-        for index, item in enumerate(self.processing_items):
-            angle = 2 * math.pi * index / len(self.processing_items)
-            radius = self.processing_radius + math.sin(t + index * 0.6) * self.processing_spread * level
-            x = center_x + math.cos(angle) * radius
-            y = center_y + math.sin(angle) * radius
-            self.canvas.coords(item, x - 4, y - 4, x + 4, y + 4)
-            alpha = 0.45 + 0.55 * level * (0.5 + 0.5 * math.sin(t + index))
-            color_value = int(220 + 15 * math.sin(t + index * 1.3))
-            self.canvas.itemconfig(item, fill=f"#{color_value:02x}{255:02x}{255:02x}")
-
+    # ── Public API ─────────────────────────────────────
     def show_waveform(self):
         self.cmd_queue.put(("show_waveform", None))
 
@@ -138,55 +101,112 @@ class TranscriptionOverlay:
     def hide(self):
         self.cmd_queue.put(("hide", None))
 
-    def update_text(self, text):
-        # No live text updates for the pulsing AI overlay.
-        pass
-
-    def run_step(self):
-        if not self.root:
-            return
-        try:
-            while not self.cmd_queue.empty():
-                cmd, _ = self.cmd_queue.get_nowait()
-                if cmd == "show_waveform":
-                    self.mode = "waveform"
-                    self.visible = True
-                    self.animation_enabled = True
-                    self.root.deiconify()
-                    for item in self.bar_items:
-                        self.canvas.itemconfig(item, state="normal")
-                    self.canvas.itemconfig(self.center_item, state="hidden")
-                    for item in self.processing_items:
-                        self.canvas.itemconfig(item, state="hidden")
-                elif cmd == "show_processing":
-                    self.mode = "processing"
-                    self.visible = True
-                    self.animation_enabled = True
-                    self.root.deiconify()
-                    for item in self.bar_items:
-                        self.canvas.itemconfig(item, state="hidden")
-                    self.canvas.itemconfig(self.center_item, state="normal")
-                    for item in self.processing_items:
-                        self.canvas.itemconfig(item, state="normal")
-                elif cmd == "hide":
-                    self.visible = False
-                    self.animation_enabled = False
-                    self.root.withdraw()
-
-            if self.visible:
-                if self.mode == "waveform":
-                    self._update_waveform()
-                else:
-                    self._update_processing()
-            self.root.update()
-        except Exception as e:
-            logger.error(f"Overlay error: {e}")
-
     def destroy(self):
         if self.root:
             try:
                 self.root.destroy()
-            except RuntimeError as e:
-                logger.error(f"Overlay destroy error: {e}")
+            except RuntimeError:
+                pass
             finally:
                 self.root = None
+
+    # ── Main loop ──────────────────────────────────────
+    def run_step(self):
+        if not self.root:
+            return
+        try:
+            self._process_commands()
+            if self.visible:
+                self._animate()
+            self.root.update()
+        except Exception as e:
+            logger.error(f"Overlay error: {e}")
+
+    def _process_commands(self):
+        while not self.cmd_queue.empty():
+            cmd, _ = self.cmd_queue.get_nowait()
+            if cmd == "show_waveform":
+                self._switch_mode("waveform")
+            elif cmd == "show_processing":
+                self._switch_mode("processing")
+            elif cmd == "hide":
+                self.visible = False
+                self.animation_enabled = False
+                self.root.attributes("-alpha", 0.0)
+                self.root.withdraw()
+
+    def _switch_mode(self, new_mode):
+        self.mode = new_mode
+        self.visible = True
+        self.animation_enabled = True
+        self.root.attributes("-alpha", 0.93)
+        self.root.deiconify()
+
+        is_wave = new_mode == "waveform"
+        for line in self.wave_lines:
+            self.canvas.itemconfig(line, state="normal" if is_wave else "hidden")
+        for dot in self.dot_items:
+            self.canvas.itemconfig(dot, state="normal" if not is_wave else "hidden")
+
+    def _animate(self):
+        t = time.time()
+        level = self.idle_level
+        if self.audio_manager:
+            level = max(self.idle_level, self.audio_manager.get_last_level())
+
+        if self.mode == "waveform":
+            self._draw_wave(t, level)
+        else:
+            self._draw_dots(t, level)
+
+    # ── Recording: Quantum Wave ────────────────────────
+    def _draw_wave(self, t, level):
+        max_amp = 18.0
+
+        for wi, line in enumerate(self.wave_lines):
+            color_r, color_g, color_b = WAVE_COLORS[wi]
+            phase_offset = wi * 1.2
+            freq = 2.5 + wi * 0.8
+            amp = max_amp * (0.3 + 0.7 * level) * (1.0 - wi * 0.15)
+
+            coords = []
+            for i in range(self.wave_points + 1):
+                px = self.wave_start_x + i * (self.wave_w / self.wave_points)
+                nx = i / self.wave_points
+
+                wave = math.sin(nx * freq * math.pi + t * 3.0 + phase_offset)
+                wave2 = math.sin(nx * (freq * 0.6) * math.pi + t * 2.1 + phase_offset * 0.7)
+                combined = wave * 0.65 + wave2 * 0.35
+
+                py = self.cy + combined * amp
+                coords.extend([px, py])
+
+            self.canvas.coords(line, *coords)
+
+            brightness = 0.5 + 0.5 * level
+            r = int(color_r * brightness + 80 * (1 - brightness))
+            g = int(color_g * brightness + 60 * (1 - brightness))
+            b = int(color_b * brightness + 120 * (1 - brightness))
+            self.canvas.itemconfig(line, fill=_hex(r, g, b))
+
+    # ── Processing: Live Dots ──────────────────────────
+    def _draw_dots(self, t, level):
+        anim = t * 3.5
+
+        for i, dot in enumerate(self.dot_items):
+            dot_cx = self.canvas.coords(dot)
+            dx = (dot_cx[0] + dot_cx[2]) / 2
+
+            wave = math.sin(anim + i * 0.9)
+            dy = self.cy + wave * 10 * (0.4 + 0.6 * level)
+
+            pulse = 1.0 + 0.25 * math.sin(t * 2.5 + i * 0.7)
+            r = self.dot_base_r * pulse
+
+            self.canvas.coords(dot, dx - r, dy - r, dx + r, dy + r)
+
+            a = 0.5 + 0.5 * (0.5 + 0.5 * math.sin(t * 1.8 + i * 1.1))
+            cr = int(DOT_COLOR[0] * a + 60)
+            cg = int(DOT_COLOR[1] * a + 60)
+            cb = int(DOT_COLOR[2] * a + 40)
+            self.canvas.itemconfig(dot, fill=_hex(cr, cg, cb))
