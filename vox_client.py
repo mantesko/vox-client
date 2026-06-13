@@ -21,10 +21,11 @@ except ImportError:
     ws_connect = None
 
 import config
-from audio import MicrophoneManager
-from overlay import TranscriptionOverlay
-from injector import TextInjector
-from tray_icon import VoxTrayIcon
+from infrastructure.SoundDeviceMicrophone import MicrophoneManager
+from presentation.TranscriptionOverlay import TranscriptionOverlay
+from infrastructure.X11TextInjector import TextInjector
+from presentation.VoxTrayIcon import VoxTrayIcon
+from presentation.VoxMenu import VoxMenu
 
 from config import LOG_LEVEL
 
@@ -39,6 +40,8 @@ class VoxClientDaemon:
         self.injector = TextInjector()
         self.audio = MicrophoneManager()
         self.overlay = TranscriptionOverlay(self.audio)
+        self.tray_menu = VoxMenu(self.overlay.root)
+        self.ui_queue = queue.Queue()
 
         self.paused = False
         self.active_recording = False
@@ -59,6 +62,7 @@ class VoxClientDaemon:
             on_check_updates=self.check_for_updates,
             on_about=self.show_about,
             on_quit=self.shutdown,
+            show_custom_menu_callback=self.show_tray_menu,
         )
 
         self.max_retries = 6
@@ -67,6 +71,10 @@ class VoxClientDaemon:
         self.shutdown_lock = threading.Lock()
         self.hotkey_listener = None
         self.overlay_destroyed = False
+
+    def show_tray_menu(self, menu_data):
+        """Ставить команду показу меню в чергу для виконання у головному потоці."""
+        self.ui_queue.put(menu_data)
 
     def _is_autostart_enabled(self) -> bool:
         autostart_file = self._get_autostart_file()
@@ -305,6 +313,9 @@ class VoxClientDaemon:
             self.last_transcription = ""
             self.active_recording = True
             session_id = self.current_session_id
+        
+        # Запуск аудіо потоку
+        self.audio.start()
 
         self.tray.update_state("recording")
         self.overlay.show_waveform()
@@ -331,7 +342,8 @@ class VoxClientDaemon:
                     "type": "start",
                     "language": self.language,
                     "model": config.WHISPER_MODEL,
-                    "api_key": getattr(config, "API_KEY", "")
+                    "api_key": getattr(config, "API_KEY", ""),
+                    "initial_prompt": getattr(config, "INITIAL_PROMPT", "") or None
                 }))
 
                 logger.info("Recording audio (WebSocket)...")
@@ -411,6 +423,10 @@ class VoxClientDaemon:
         with self.recording_lock:
             self.active_recording = False
         self.audio.route_to_server = False
+        
+        # Зупинка аудіо потоку
+        self.audio.stop()
+        
         self.overlay.hide()
         if not self.paused:
             self.tray.update_state("listening")
@@ -424,7 +440,7 @@ class VoxClientDaemon:
         self.hotkey_listener.start()
 
     def run(self):
-        self.audio.start()
+        # self.audio.start() -- видалено, запуск динамічний
         self.tray.set_audio_devices(self.audio.list_input_devices(), self.audio.device)
         self.tray.set_language(self.language)
         self.tray.set_autostart(self.autostart_enabled)
@@ -432,12 +448,23 @@ class VoxClientDaemon:
         self._init_hotkeys()
         self.tray.start()
         logger.info(f"Using VOX_SERVER_URL: {config.SERVER_BASE_URL}")
+
         if config.SERVER_BASE_URL.startswith("ws"):
             logger.info("WebSocket transcription mode enabled")
         else:
             logger.info("HTTP transcription mode enabled")
         try:
             while not self.stop_event.is_set():
+                # Обробка черги UI команд
+                try:
+                    while not self.ui_queue.empty():
+                        menu_data = self.ui_queue.get_nowait()
+                        x, y = self.overlay.root.winfo_pointerxy()
+                        self.tray_menu.set_data(menu_data)
+                        self.tray_menu.show(x, y)
+                except queue.Empty:
+                    pass
+                
                 self.overlay.run_step()
                 time.sleep(0.01)
         except KeyboardInterrupt:

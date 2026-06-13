@@ -24,6 +24,7 @@ def _resolve_server_url() -> str:
 SERVER_BASE_URL = _resolve_server_url()
 WHISPER_MODEL = os.getenv("VOX_WHISPER_MODEL", "Systran/faster-whisper-small")
 API_KEY = os.getenv("VOX_API_KEY", "")
+INITIAL_PROMPT = os.getenv("VOX_INITIAL_PROMPT", "")
 
 # Log level for the client.
 # Configure this with VOX_LOG_LEVEL (e.g. DEBUG, INFO, WARNING).
