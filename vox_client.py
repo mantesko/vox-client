@@ -62,6 +62,7 @@ class VoxClientDaemon:
             on_check_updates=self.check_for_updates,
             on_about=self.show_about,
             on_quit=self.shutdown,
+            on_edit_prompt=self.edit_prompt,
             show_custom_menu_callback=self.show_tray_menu,
         )
 
@@ -71,6 +72,7 @@ class VoxClientDaemon:
         self.shutdown_lock = threading.Lock()
         self.hotkey_listener = None
         self.overlay_destroyed = False
+        self.initial_prompt = self._load_prompt()
 
     def show_tray_menu(self, menu_data):
         """Ставить команду показу меню в чергу для виконання у головному потоці."""
@@ -94,6 +96,45 @@ class VoxClientDaemon:
             "X-GNOME-Autostart-enabled=true\n"
             "NoDisplay=false\n"
         )
+
+    def _get_prompt_file(self) -> str:
+        return os.path.join(os.path.dirname(os.path.abspath(__file__)), ".prompt")
+
+    def _load_prompt(self) -> str:
+        try:
+            with open(self._get_prompt_file(), "r", encoding="utf-8") as f:
+                return f.read().strip()
+        except FileNotFoundError:
+            return ""
+
+    def _save_prompt(self, prompt: str):
+        try:
+            with open(self._get_prompt_file(), "w", encoding="utf-8") as f:
+                f.write(prompt)
+            self.initial_prompt = prompt
+            self.tray.set_initial_prompt(prompt)
+        except Exception as e:
+            logger.error(f"Failed to save prompt: {e}")
+
+    def edit_prompt(self):
+        import tkinter as tk
+        from tkinter import simpledialog
+
+        def _show_dialog():
+            root = tk.Tk()
+            root.withdraw()
+            current = self.initial_prompt or ""
+            prompt = simpledialog.askstring(
+                "Vox - Initial Prompt",
+                "Enter initial prompt for Whisper.\nThis helps recognize Ukrainian and technical terms:",
+                initialvalue=current,
+                parent=root,
+            )
+            root.destroy()
+            if prompt is not None:
+                self._save_prompt(prompt.strip())
+
+        self.ui_queue.put(("dialog", _show_dialog))
 
     def toggle_pause(self, paused: bool):
         self.paused = paused
@@ -343,7 +384,7 @@ class VoxClientDaemon:
                     "language": self.language,
                     "model": config.WHISPER_MODEL,
                     "api_key": getattr(config, "API_KEY", ""),
-                    "initial_prompt": getattr(config, "INITIAL_PROMPT", "") or None
+                    "initial_prompt": self.initial_prompt or getattr(config, "INITIAL_PROMPT", "") or None
                 }))
 
                 logger.info("Recording audio (WebSocket)...")
@@ -445,6 +486,7 @@ class VoxClientDaemon:
         self.tray.set_language(self.language)
         self.tray.set_autostart(self.autostart_enabled)
         self.tray.set_paused(self.paused)
+        self.tray.set_initial_prompt(self.initial_prompt)
         self._init_hotkeys()
         self.tray.start()
         logger.info(f"Using VOX_SERVER_URL: {config.SERVER_BASE_URL}")
@@ -458,10 +500,14 @@ class VoxClientDaemon:
                 # Обробка черги UI команд
                 try:
                     while not self.ui_queue.empty():
-                        menu_data = self.ui_queue.get_nowait()
-                        x, y = self.overlay.root.winfo_pointerxy()
-                        self.tray_menu.set_data(menu_data)
-                        self.tray_menu.show(x, y)
+                        item = self.ui_queue.get_nowait()
+                        if isinstance(item, tuple) and item[0] == "dialog":
+                            item[1]()
+                        else:
+                            menu_data = item
+                            x, y = self.overlay.root.winfo_pointerxy()
+                            self.tray_menu.set_data(menu_data)
+                            self.tray_menu.show(x, y)
                 except queue.Empty:
                     pass
                 
