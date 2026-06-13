@@ -1,6 +1,7 @@
 import queue
 import logging
 import threading
+import wave
 import numpy as np
 import sounddevice as sd
 from collections import deque
@@ -20,6 +21,8 @@ class MicrophoneManager:
         self.audio_buffer = deque(maxlen=3)  # Keep last 3 chunks for context
         self.level_lock = threading.Lock()
         self.last_level = 0.0
+        self._wav_file = None
+        self._recording_wav = False
 
     def get_last_level(self) -> float:
         with self.level_lock:
@@ -71,6 +74,9 @@ class MicrophoneManager:
             # Convert back to int16 for transmission
             normalized_int16 = (normalized * 32768.0).astype(np.int16)
             self.server_queue.put(bytes(normalized_int16))
+
+            if self._recording_wav and self._wav_file:
+                self._wav_file.writeframes(bytes(normalized_int16))
 
     def list_input_devices(self):
         """Return a list of available input devices as (id, name)."""
@@ -141,3 +147,25 @@ class MicrophoneManager:
                 self.server_queue.get_nowait()
             except queue.Empty:
                 break
+
+    def start_wav_recording(self, filepath="debug_mic.wav"):
+        try:
+            self._wav_file = wave.open(filepath, "wb")
+            self._wav_file.setnchannels(1)
+            self._wav_file.setsampwidth(2)
+            self._wav_file.setframerate(self.sample_rate)
+            self._recording_wav = True
+            logger.info(f"Recording mic to {filepath}")
+        except Exception as e:
+            logger.error(f"Failed to start WAV recording: {e}")
+
+    def stop_wav_recording(self):
+        self._recording_wav = False
+        if self._wav_file:
+            try:
+                self._wav_file.close()
+                logger.info("WAV recording saved")
+            except Exception as e:
+                logger.error(f"Failed to close WAV file: {e}")
+            finally:
+                self._wav_file = None

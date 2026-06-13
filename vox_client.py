@@ -357,6 +357,7 @@ class VoxClientDaemon:
         
         # Запуск аудіо потоку
         self.audio.start()
+        self.audio.start_wav_recording()
 
         self.tray.update_state("recording")
         self.overlay.show_waveform()
@@ -466,6 +467,7 @@ class VoxClientDaemon:
         self.audio.route_to_server = False
         
         # Зупинка аудіо потоку
+        self.audio.stop_wav_recording()
         self.audio.stop()
         
         self.overlay.hide()
