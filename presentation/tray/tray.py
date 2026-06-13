@@ -20,6 +20,7 @@ class VoxTrayIcon:
         on_about,
         on_quit,
         on_toggle_save_audio=None,
+        on_play_recording=None,
         on_toggle_auto_enter=None,
         title="Vox - hands-free voice to text",
     ):
@@ -35,6 +36,7 @@ class VoxTrayIcon:
             "open_preferences": on_open_preferences,
             "toggle_autostart": self._toggle_autostart,
             "toggle_save_audio": self._toggle_save_audio,
+            "play_recording": on_play_recording,
             "toggle_auto_enter": self._toggle_auto_enter,
             "about": on_about,
             "quit": self._quit,
@@ -68,6 +70,10 @@ class VoxTrayIcon:
 
     def set_save_audio(self, enabled: bool):
         self._tray_state.save_audio = enabled
+        self._refresh_menu()
+
+    def set_recording_exists(self, exists: bool):
+        self._tray_state.recording_exists = exists
         self._refresh_menu()
 
     def set_auto_enter(self, enabled: bool):

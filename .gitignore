@@ -9,7 +9,6 @@ venv/
 # Audio / Temp files
 *.raw
 *.wav
-debug_mic.raw
 
 # Models
 models/

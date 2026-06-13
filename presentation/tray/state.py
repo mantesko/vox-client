@@ -7,6 +7,7 @@ class TrayState:
     last_text: str = ""
     autostart_enabled: bool = False
     save_audio: bool = False
+    recording_exists: bool = False
     auto_enter: bool = True
     state: str = "listening"
 
@@ -30,6 +31,7 @@ class TrayState:
             last_text=self.last_text,
             autostart_enabled=self.autostart_enabled,
             save_audio=self.save_audio,
+            recording_exists=self.recording_exists,
             auto_enter=self.auto_enter,
             state=self.state,
         )

@@ -57,6 +57,7 @@ class VoxClientDaemon:
             on_about=self.show_about,
             on_quit=self.shutdown,
             on_toggle_save_audio=self.toggle_save_audio,
+            on_play_recording=self.play_recording,
             on_toggle_auto_enter=self.toggle_auto_enter,
         )
 
@@ -147,7 +148,22 @@ class VoxClientDaemon:
 
     def toggle_save_audio(self, enabled: bool):
         self.tray.set_save_audio(enabled)
-        logger.info(f"Збереження аудіо {'увімкнено' if enabled else 'вимкнено'}")
+        logger.info(f"Debug recording {'enabled' if enabled else 'disabled'}")
+
+    def play_recording(self):
+        wav_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "debug_mic.wav")
+        if not os.path.exists(wav_path):
+            logger.info("No recording file found")
+            return
+        try:
+            if sys.platform.startswith("linux"):
+                subprocess.Popen(["xdg-open", wav_path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            elif sys.platform == "darwin":
+                subprocess.Popen(["open", wav_path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            elif sys.platform == "win32":
+                os.startfile(wav_path)
+        except Exception as e:
+            logger.error(f"Failed to play recording: {e}")
 
     def toggle_auto_enter(self, enabled: bool):
         config.save_settings(auto_enter=enabled)
@@ -373,6 +389,9 @@ class VoxClientDaemon:
         self.audio.stop_wav_recording()
         self.audio.stop()
         
+        wav_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "debug_mic.wav")
+        self.tray.set_recording_exists(os.path.exists(wav_path))
+        
         self.overlay.hide()
         if not self.paused:
             self.tray.update_state("listening")
@@ -386,10 +405,11 @@ class VoxClientDaemon:
         self.hotkey_listener.start()
 
     def run(self):
-        # self.audio.start() -- видалено, запуск динамічний
+        wav_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "debug_mic.wav")
         self.tray.set_autostart(self.autostart_enabled)
         self.tray.set_paused(self.paused)
         self.tray.set_save_audio(False)
+        self.tray.set_recording_exists(os.path.exists(wav_path))
         self.tray.set_auto_enter(config.AUTO_ENTER)
         self._init_hotkeys()
         self.tray.start()
