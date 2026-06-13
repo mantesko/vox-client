@@ -22,6 +22,7 @@ class VoxTrayIcon:
         on_about,
         on_quit,
         on_edit_prompt=None,
+        on_toggle_save_audio=None,
         show_custom_menu_callback=None,
         title="Vox - hands-free voice to text",
     ):
@@ -35,6 +36,7 @@ class VoxTrayIcon:
         self.on_about = on_about
         self.on_quit = on_quit
         self.on_edit_prompt = on_edit_prompt
+        self.on_toggle_save_audio = on_toggle_save_audio
         self.show_custom_menu_callback = show_custom_menu_callback
         self.title = title
 
@@ -45,6 +47,7 @@ class VoxTrayIcon:
         self.language = "uk"
         self.autostart_enabled = False
         self.initial_prompt = ""
+        self.save_audio = False
         self.state = "listening"  # "listening", "idle", "recording"
 
         self.icon = None
@@ -120,6 +123,10 @@ class VoxTrayIcon:
         self.initial_prompt = prompt or ""
         self._refresh_menu()
 
+    def set_save_audio(self, enabled: bool):
+        self.save_audio = enabled
+        self._refresh_menu()
+
     def _refresh_icon(self):
         self.current_image = self._generate_icon_image()
         if self.icon:
@@ -160,6 +167,12 @@ class VoxTrayIcon:
         self._refresh_menu()
         if self.on_toggle_autostart:
             self.on_toggle_autostart(self.autostart_enabled)
+
+    def _toggle_save_audio_action(self, icon=None, item=None):
+        self.save_audio = not self.save_audio
+        self._refresh_menu()
+        if self.on_toggle_save_audio:
+            self.on_toggle_save_audio(self.save_audio)
 
     def _check_updates_action(self, icon=None, item=None):
         if self.on_check_updates:
@@ -220,6 +233,7 @@ class VoxTrayIcon:
             {"label": "Preferences...", "callback": self._open_preferences_action},
             {"separator": True},
             {"label": "Start on Boot", "callback": self._toggle_autostart_action, "checked": self.autostart_enabled},
+            {"label": "Save Audio", "callback": self._toggle_save_audio_action, "checked": self.save_audio},
             {"label": "Check for Updates", "callback": self._check_updates_action},
             {"separator": True},
             {"label": "About", "callback": self._about_action},

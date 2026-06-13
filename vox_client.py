@@ -63,6 +63,7 @@ class VoxClientDaemon:
             on_about=self.show_about,
             on_quit=self.shutdown,
             on_edit_prompt=self.edit_prompt,
+            on_toggle_save_audio=self.toggle_save_audio,
             show_custom_menu_callback=self.show_tray_menu,
         )
 
@@ -217,6 +218,10 @@ class VoxClientDaemon:
             self.autostart_enabled = self._is_autostart_enabled()
         self.tray.set_autostart(self.autostart_enabled)
 
+    def toggle_save_audio(self, enabled: bool):
+        self.tray.set_save_audio(enabled)
+        logger.info(f"Збереження аудіо {'увімкнено' if enabled else 'вимкнено'}")
+
     def check_for_updates(self):
         threading.Thread(target=self._check_for_updates_worker, daemon=True).start()
 
@@ -357,7 +362,8 @@ class VoxClientDaemon:
         
         # Запуск аудіо потоку
         self.audio.start()
-        self.audio.start_wav_recording()
+        if self.tray.save_audio:
+            self.audio.start_wav_recording()
 
         self.tray.update_state("recording")
         self.overlay.show_waveform()
@@ -489,6 +495,7 @@ class VoxClientDaemon:
         self.tray.set_autostart(self.autostart_enabled)
         self.tray.set_paused(self.paused)
         self.tray.set_initial_prompt(self.initial_prompt)
+        self.tray.set_save_audio(False)
         self._init_hotkeys()
         self.tray.start()
         logger.info(f"Using VOX_SERVER_URL: {config.SERVER_BASE_URL}")
