@@ -304,7 +304,11 @@ class VoxClientDaemon:
                     "type": "start",
                     "language": self.language,
                     "api_key": getattr(config, "API_KEY", ""),
-                    "initial_prompt": self.initial_prompt or getattr(config, "INITIAL_PROMPT", "") or None
+                    "initial_prompt": self.initial_prompt or getattr(config, "INITIAL_PROMPT", "") or None,
+                    "groq_api_key": getattr(config, "GROQ_API_KEY", "") or None,
+                    "groq_prompt": getattr(config, "GROQ_PROMPT", "") or None,
+                    "groq_model": getattr(config, "GROQ_MODEL", "") or None,
+                    "groq_temperature": getattr(config, "GROQ_TEMPERATURE", 0.2),
                 }))
 
                 logger.info("Recording audio (WebSocket)...")

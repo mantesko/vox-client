@@ -21,6 +21,11 @@ _DEFAULTS = {
     "hotkey": "<ctrl>+<space>",
     "api_key": "",
     "log_level": "INFO",
+    "groq_post_process": False,
+    "groq_api_key": "",
+    "groq_prompt": "",
+    "groq_model": "llama-3.3-70b-versatile",
+    "groq_temperature": 0.2,
 }
 
 LANGUAGE = _DEFAULTS["language"]
@@ -30,6 +35,11 @@ SERVER_BASE_URL = _DEFAULTS["server_url"]
 HOTKEY = _DEFAULTS["hotkey"]
 API_KEY = _DEFAULTS["api_key"]
 LOG_LEVEL = _DEFAULTS["log_level"]
+GROQ_POST_PROCESS = _DEFAULTS["groq_post_process"]
+GROQ_API_KEY = _DEFAULTS["groq_api_key"]
+GROQ_PROMPT = _DEFAULTS["groq_prompt"]
+GROQ_MODEL = _DEFAULTS["groq_model"]
+GROQ_TEMPERATURE = _DEFAULTS["groq_temperature"]
 
 
 def _load_settings() -> dict:
@@ -48,6 +58,7 @@ def _save_settings(data: dict):
 
 def load_settings():
     global LANGUAGE, AUTO_ENTER, INITIAL_PROMPT, SERVER_BASE_URL, HOTKEY, API_KEY, LOG_LEVEL
+    global GROQ_POST_PROCESS, GROQ_API_KEY, GROQ_PROMPT, GROQ_MODEL, GROQ_TEMPERATURE
     s = _load_settings()
     LANGUAGE = s["language"]
     AUTO_ENTER = s["auto_enter"]
@@ -56,10 +67,16 @@ def load_settings():
     HOTKEY = s["hotkey"]
     API_KEY = s["api_key"]
     LOG_LEVEL = s["log_level"]
+    GROQ_POST_PROCESS = s["groq_post_process"]
+    GROQ_API_KEY = s["groq_api_key"]
+    GROQ_PROMPT = s["groq_prompt"]
+    GROQ_MODEL = s["groq_model"]
+    GROQ_TEMPERATURE = s["groq_temperature"]
 
 
 def save_settings(**kwargs):
     global LANGUAGE, AUTO_ENTER, INITIAL_PROMPT, SERVER_BASE_URL, HOTKEY, API_KEY, LOG_LEVEL
+    global GROQ_POST_PROCESS, GROQ_API_KEY, GROQ_PROMPT, GROQ_MODEL, GROQ_TEMPERATURE
     s = _load_settings()
     for key, value in kwargs.items():
         if key in s:
@@ -78,6 +95,16 @@ def save_settings(**kwargs):
         API_KEY = kwargs["api_key"]
     if "log_level" in kwargs:
         LOG_LEVEL = kwargs["log_level"]
+    if "groq_post_process" in kwargs:
+        GROQ_POST_PROCESS = kwargs["groq_post_process"]
+    if "groq_api_key" in kwargs:
+        GROQ_API_KEY = kwargs["groq_api_key"]
+    if "groq_prompt" in kwargs:
+        GROQ_PROMPT = kwargs["groq_prompt"]
+    if "groq_model" in kwargs:
+        GROQ_MODEL = kwargs["groq_model"]
+    if "groq_temperature" in kwargs:
+        GROQ_TEMPERATURE = kwargs["groq_temperature"]
     _save_settings(s)
 
 

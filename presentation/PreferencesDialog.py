@@ -65,6 +65,57 @@ class PreferencesDialog:
         self.prompt_text.insert("1.0", config.INITIAL_PROMPT)
         row += 1
 
+        ttk.Separator(frame, orient="horizontal").grid(row=row, column=0, columnspan=3, sticky="ew", pady=(8, 8))
+        row += 1
+
+        self.groq_enabled_var = tk.BooleanVar(value=config.GROQ_POST_PROCESS)
+        self.groq_check = ttk.Checkbutton(
+            frame, text="Groq пост-обробка тексту", variable=self.groq_enabled_var,
+            command=self._toggle_groq_fields
+        )
+        self.groq_check.grid(row=row, column=0, columnspan=2, sticky="w", pady=(0, 4))
+        row += 1
+
+        self.groq_key_label = ttk.Label(frame, text="Groq API Key:")
+        self.groq_key_label.grid(row=row, column=0, sticky="w", pady=(0, 4))
+        self.groq_api_key_var = tk.StringVar(value=config.GROQ_API_KEY)
+        self.groq_key_entry = ttk.Entry(frame, textvariable=self.groq_api_key_var, width=50, show="*")
+        self.groq_key_entry.grid(row=row, column=1, sticky="ew", pady=(0, 4))
+        self.show_groq_key_var = tk.BooleanVar(value=False)
+        self.groq_show_btn = ttk.Checkbutton(frame, text="Show", variable=self.show_groq_key_var, command=self._toggle_groq_key_visibility)
+        self.groq_show_btn.grid(row=row, column=2, padx=(4, 0))
+        row += 1
+
+        self.groq_prompt_label = ttk.Label(frame, text="Groq Промпт:")
+        self.groq_prompt_label.grid(row=row, column=0, sticky="nw", pady=(0, 4))
+        self.groq_prompt_text = tk.Text(frame, height=3, width=50, wrap="word")
+        self.groq_prompt_text.grid(row=row, column=1, columnspan=2, sticky="ew", pady=(0, 4))
+        default_groq_prompt = config.GROQ_PROMPT or (
+            "Ти — експерт із редагування українського тексту. Твоє завдання — зробити "
+            "пост-обробку тексту, отриманого після розпізнавання мовлення (STT). "
+            "Виправ друкарські помилки, граматику, пунктуацію та розбий текст на логічні абзаци, "
+            "якщо це необхідно. Зберігай оригінальний зміст, тон та мову (українську). "
+            "НЕ додавай жодних коментарів від себе. Виводь ТІЛЬКИ чистий виправлений текст."
+        )
+        self.groq_prompt_text.insert("1.0", default_groq_prompt)
+        row += 1
+
+        self.groq_model_label = ttk.Label(frame, text="Модель:")
+        self.groq_model_label.grid(row=row, column=0, sticky="w", pady=(0, 4))
+        self.groq_model_var = tk.StringVar(value=config.GROQ_MODEL)
+        self.groq_model_entry = ttk.Entry(frame, textvariable=self.groq_model_var, width=30)
+        self.groq_model_entry.grid(row=row, column=1, sticky="w", pady=(0, 4))
+        row += 1
+
+        self.groq_temp_label = ttk.Label(frame, text="Temperature:")
+        self.groq_temp_label.grid(row=row, column=0, sticky="w", pady=(0, 4))
+        self.groq_temperature_var = tk.StringVar(value=str(config.GROQ_TEMPERATURE))
+        self.groq_temperature_entry = ttk.Entry(frame, textvariable=self.groq_temperature_var, width=10)
+        self.groq_temperature_entry.grid(row=row, column=1, sticky="w", pady=(0, 4))
+        row += 1
+
+        self._toggle_groq_fields()
+
         btn_frame = ttk.Frame(frame)
         btn_frame.grid(row=row, column=0, columnspan=3, pady=(12, 0), sticky="e")
         ttk.Button(btn_frame, text="Cancel", command=self._cancel).pack(side="right", padx=(8, 0))
@@ -78,7 +129,19 @@ class PreferencesDialog:
     def _toggle_key_visibility(self):
         self.api_key_entry.configure(show="" if self.show_key_var.get() else "*")
 
+    def _toggle_groq_key_visibility(self):
+        self.groq_key_entry.configure(show="" if self.show_groq_key_var.get() else "*")
+
+    def _toggle_groq_fields(self):
+        state = "normal" if self.groq_enabled_var.get() else "disabled"
+        self.groq_key_entry.configure(state=state)
+        self.groq_prompt_text.configure(state=state)
+        self.groq_show_btn.configure(state=state)
+        self.groq_model_entry.configure(state=state)
+        self.groq_temperature_entry.configure(state=state)
+
     def _save(self):
+        groq_enabled = self.groq_enabled_var.get()
         settings = {
             "server_url": self.server_var.get().strip(),
             "language": self.language_var.get(),
@@ -86,6 +149,11 @@ class PreferencesDialog:
             "api_key": self.api_key_var.get().strip(),
             "log_level": self.log_level_var.get(),
             "initial_prompt": self.prompt_text.get("1.0", "end-1c").strip(),
+            "groq_post_process": groq_enabled,
+            "groq_api_key": self.groq_api_key_var.get().strip() if groq_enabled else "",
+            "groq_prompt": self.groq_prompt_text.get("1.0", "end-1c").strip() if groq_enabled else "",
+            "groq_model": self.groq_model_var.get().strip() if groq_enabled else "llama-3.3-70b-versatile",
+            "groq_temperature": float(self.groq_temperature_var.get().strip()) if groq_enabled else 0.2,
         }
         config.save_settings(**settings)
         logger.info(f"Preferences saved")
