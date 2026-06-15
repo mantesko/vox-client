@@ -15,14 +15,22 @@ class MicrophoneManager:
         self.stream = None
         self.server_queue = queue.Queue()
         self.route_to_server = False
-        self.silence_threshold = 0.01  # Adjust based on your environment
+        self.silence_threshold = 0.008
         self.consecutive_silence_chunks = 0
-        self.max_silence_chunks = 5  # ~0.5 seconds at 16kHz
-        self.audio_buffer = deque(maxlen=3)  # Keep last 3 chunks for context
+        self.max_silence_chunks = 3
+        self.consecutive_speech_chunks = 0
+        self.min_speech_chunks = 2
+        self.is_speaking = False
+        self.audio_buffer = deque(maxlen=3)
         self.level_lock = threading.Lock()
         self.last_level = 0.0
         self._wav_file = None
         self._recording_wav = False
+        self._hp_b0 = 0.9695
+        self._hp_b1 = -0.9390
+        self._hp_a1 = -0.8780
+        self._hp_prev_x = 0.0
+        self._hp_prev_y = 0.0
 
     def get_last_level(self) -> float:
         with self.level_lock:
@@ -41,10 +49,24 @@ class MicrophoneManager:
             audio_float = audio_float / max_val * 0.95
         return audio_float
 
+    def _high_pass_filter(self, audio_float: np.ndarray) -> np.ndarray:
+        out = np.empty_like(audio_float)
+        px, py = self._hp_prev_x, self._hp_prev_y
+        b0, b1, a1 = self._hp_b0, self._hp_b1, self._hp_a1
+        for i in range(len(audio_float)):
+            x = audio_float[i]
+            y = b0 * x + b1 * px - a1 * py
+            out[i] = y
+            px = x
+            py = y
+        self._hp_prev_x = px
+        self._hp_prev_y = py
+        return out
+
     def _detect_silence(self, audio_data: np.ndarray) -> bool:
-        """Detect if audio chunk is silence using RMS energy"""
         audio_float = audio_data.astype(np.float32) / 32768.0
-        rms = np.sqrt(np.mean(audio_float ** 2))
+        filtered = self._high_pass_filter(audio_float)
+        rms = np.sqrt(np.mean(filtered ** 2))
         return rms < self.silence_threshold
 
     def _audio_callback(self, indata, frames, time_info, status):
@@ -54,24 +76,27 @@ class MicrophoneManager:
         if self.route_to_server:
             audio_data = indata.copy().astype(np.int16)
             audio_float = audio_data.astype(np.float32) / 32768.0
-            rms = np.sqrt(np.mean(audio_float ** 2))
+            filtered = self._high_pass_filter(audio_float)
+            rms = np.sqrt(np.mean(filtered ** 2))
             level = min(1.0, rms * 6.0)
             self._set_last_level(level)
 
-            # Check for silence
-            if self._detect_silence(audio_data):
+            if rms < self.silence_threshold:
                 self.consecutive_silence_chunks += 1
-                # Drop consecutive silence chunks (but keep some for context)
-                if self.consecutive_silence_chunks > self.max_silence_chunks:
+                self.consecutive_speech_chunks = 0
+                if self.is_speaking and self.consecutive_silence_chunks > self.max_silence_chunks:
+                    self.is_speaking = False
+                if not self.is_speaking:
                     self._set_last_level(level * 0.15)
                     return
             else:
                 self.consecutive_silence_chunks = 0
+                self.consecutive_speech_chunks += 1
+                if not self.is_speaking and self.consecutive_speech_chunks >= self.min_speech_chunks:
+                    self.is_speaking = True
                 self._set_last_level(level)
 
-            # Normalize and send
             normalized = self._normalize_audio(audio_data)
-            # Convert back to int16 for transmission
             normalized_int16 = (normalized * 32768.0).astype(np.int16)
             self.server_queue.put(bytes(normalized_int16))
 
