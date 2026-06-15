@@ -8,6 +8,15 @@ logger = logging.getLogger("VoxPreferences")
 
 LANGUAGES = [("Українська", "uk"), ("English", "en")]
 LOG_LEVELS = ["DEBUG", "INFO", "WARNING", "ERROR"]
+PROVIDERS = [("Groq", "groq"), ("Google Gemini", "gemini")]
+
+DEFAULT_PROMPT = (
+    "Ти — експерт із редагування українського тексту. Твоє завдання — зробити "
+    "пост-обробку тексту, отриманого після розпізнавання мовлення (STT). "
+    "Виправ друкарські помилки, граматику, пунктуацію та розбий текст на логічні абзаци, "
+    "якщо це необхідно. Зберігай оригінальний зміст, тон та мову (українську). "
+    "НЕ додавай жодних коментарів від себе. Виводь ТІЛЬКИ чистий виправлений текст."
+)
 
 
 class PreferencesDialog:
@@ -59,7 +68,6 @@ class PreferencesDialog:
         row += 1
 
         ttk.Label(frame, text="Initial Prompt:").grid(row=row, column=0, sticky="nw", pady=(0, 4))
-        self.prompt_var = tk.StringVar(value=config.INITIAL_PROMPT)
         self.prompt_text = tk.Text(frame, height=3, width=50, wrap="word")
         self.prompt_text.grid(row=row, column=1, columnspan=2, sticky="ew", pady=(0, 4))
         self.prompt_text.insert("1.0", config.INITIAL_PROMPT)
@@ -68,53 +76,28 @@ class PreferencesDialog:
         ttk.Separator(frame, orient="horizontal").grid(row=row, column=0, columnspan=3, sticky="ew", pady=(8, 8))
         row += 1
 
-        self.groq_enabled_var = tk.BooleanVar(value=config.GROQ_POST_PROCESS)
-        self.groq_check = ttk.Checkbutton(
-            frame, text="Groq пост-обробка тексту", variable=self.groq_enabled_var,
-            command=self._toggle_groq_fields
-        )
-        self.groq_check.grid(row=row, column=0, columnspan=2, sticky="w", pady=(0, 4))
+        self.post_process_var = tk.BooleanVar(value=config.POST_PROCESS)
+        ttk.Checkbutton(
+            frame, text="Пост-обробка тексту (LLM)", variable=self.post_process_var,
+            command=self._toggle_provider_fields
+        ).grid(row=row, column=0, columnspan=2, sticky="w", pady=(0, 4))
         row += 1
 
-        self.groq_key_label = ttk.Label(frame, text="Groq API Key:")
-        self.groq_key_label.grid(row=row, column=0, sticky="w", pady=(0, 4))
-        self.groq_api_key_var = tk.StringVar(value=config.GROQ_API_KEY)
-        self.groq_key_entry = ttk.Entry(frame, textvariable=self.groq_api_key_var, width=50, show="*")
-        self.groq_key_entry.grid(row=row, column=1, sticky="ew", pady=(0, 4))
-        self.show_groq_key_var = tk.BooleanVar(value=False)
-        self.groq_show_btn = ttk.Checkbutton(frame, text="Show", variable=self.show_groq_key_var, command=self._toggle_groq_key_visibility)
-        self.groq_show_btn.grid(row=row, column=2, padx=(4, 0))
+        self.provider_label = ttk.Label(frame, text="Провайдер:")
+        self.provider_label.grid(row=row, column=0, sticky="w", pady=(0, 4))
+        self.provider_var = tk.StringVar(value=config.POST_PROCESS_PROVIDER)
+        self.provider_combo = ttk.Combobox(frame, textvariable=self.provider_var, values=[v for _, v in PROVIDERS], state="readonly", width=15)
+        self.provider_combo.grid(row=row, column=1, sticky="w", pady=(0, 4))
+        self.provider_combo.bind("<<ComboboxSelected>>", lambda e: self._toggle_provider_fields())
         row += 1
 
-        self.groq_prompt_label = ttk.Label(frame, text="Groq Промпт:")
-        self.groq_prompt_label.grid(row=row, column=0, sticky="nw", pady=(0, 4))
-        self.groq_prompt_text = tk.Text(frame, height=3, width=50, wrap="word")
-        self.groq_prompt_text.grid(row=row, column=1, columnspan=2, sticky="ew", pady=(0, 4))
-        default_groq_prompt = config.GROQ_PROMPT or (
-            "Ти — експерт із редагування українського тексту. Твоє завдання — зробити "
-            "пост-обробку тексту, отриманого після розпізнавання мовлення (STT). "
-            "Виправ друкарські помилки, граматику, пунктуацію та розбий текст на логічні абзаци, "
-            "якщо це необхідно. Зберігай оригінальний зміст, тон та мову (українську). "
-            "НЕ додавай жодних коментарів від себе. Виводь ТІЛЬКИ чистий виправлений текст."
-        )
-        self.groq_prompt_text.insert("1.0", default_groq_prompt)
-        row += 1
+        self._build_groq_fields(frame, row)
+        row += 5
 
-        self.groq_model_label = ttk.Label(frame, text="Модель:")
-        self.groq_model_label.grid(row=row, column=0, sticky="w", pady=(0, 4))
-        self.groq_model_var = tk.StringVar(value=config.GROQ_MODEL)
-        self.groq_model_entry = ttk.Entry(frame, textvariable=self.groq_model_var, width=30)
-        self.groq_model_entry.grid(row=row, column=1, sticky="w", pady=(0, 4))
-        row += 1
+        self._build_gemini_fields(frame, row)
+        row += 5
 
-        self.groq_temp_label = ttk.Label(frame, text="Temperature:")
-        self.groq_temp_label.grid(row=row, column=0, sticky="w", pady=(0, 4))
-        self.groq_temperature_var = tk.StringVar(value=str(config.GROQ_TEMPERATURE))
-        self.groq_temperature_entry = ttk.Entry(frame, textvariable=self.groq_temperature_var, width=10)
-        self.groq_temperature_entry.grid(row=row, column=1, sticky="w", pady=(0, 4))
-        row += 1
-
-        self._toggle_groq_fields()
+        self._toggle_provider_fields()
 
         btn_frame = ttk.Frame(frame)
         btn_frame.grid(row=row, column=0, columnspan=3, pady=(12, 0), sticky="e")
@@ -126,22 +109,100 @@ class PreferencesDialog:
         self.root.protocol("WM_DELETE_WINDOW", self._cancel)
         self.root.grab_set()
 
+    def _build_groq_fields(self, frame, start_row):
+        self.groq_frame = ttk.Frame(frame)
+
+        r = 0
+        ttk.Label(self.groq_frame, text="API Key:").grid(row=r, column=0, sticky="w", pady=(0, 4))
+        self.groq_api_key_var = tk.StringVar(value=config.GROQ_API_KEY)
+        self.groq_key_entry = ttk.Entry(self.groq_frame, textvariable=self.groq_api_key_var, width=50, show="*")
+        self.groq_key_entry.grid(row=r, column=1, sticky="ew", pady=(0, 4))
+        self.show_groq_key_var = tk.BooleanVar(value=False)
+        self.groq_show_btn = ttk.Checkbutton(self.groq_frame, text="Show", variable=self.show_groq_key_var, command=self._toggle_groq_key_visibility)
+        self.groq_show_btn.grid(row=r, column=2, padx=(4, 0))
+        r += 1
+
+        ttk.Label(self.groq_frame, text="Промпт:").grid(row=r, column=0, sticky="nw", pady=(0, 4))
+        self.groq_prompt_text = tk.Text(self.groq_frame, height=3, width=50, wrap="word")
+        self.groq_prompt_text.grid(row=r, column=1, columnspan=2, sticky="ew", pady=(0, 4))
+        self.groq_prompt_text.insert("1.0", config.GROQ_PROMPT or DEFAULT_PROMPT)
+        r += 1
+
+        ttk.Label(self.groq_frame, text="Модель:").grid(row=r, column=0, sticky="w", pady=(0, 4))
+        self.groq_model_var = tk.StringVar(value=config.GROQ_MODEL)
+        self.groq_model_entry = ttk.Entry(self.groq_frame, textvariable=self.groq_model_var, width=30)
+        self.groq_model_entry.grid(row=r, column=1, sticky="w", pady=(0, 4))
+        r += 1
+
+        ttk.Label(self.groq_frame, text="Temperature:").grid(row=r, column=0, sticky="w", pady=(0, 4))
+        self.groq_temperature_var = tk.StringVar(value=str(config.GROQ_TEMPERATURE))
+        self.groq_temperature_entry = ttk.Entry(self.groq_frame, textvariable=self.groq_temperature_var, width=10)
+        self.groq_temperature_entry.grid(row=r, column=1, sticky="w", pady=(0, 4))
+
+        self.groq_frame.grid(row=start_row, column=0, columnspan=3, sticky="ew")
+
+    def _build_gemini_fields(self, frame, start_row):
+        self.gemini_frame = ttk.Frame(frame)
+
+        r = 0
+        ttk.Label(self.gemini_frame, text="API Key:").grid(row=r, column=0, sticky="w", pady=(0, 4))
+        self.gemini_api_key_var = tk.StringVar(value=config.GEMINI_API_KEY)
+        self.gemini_key_entry = ttk.Entry(self.gemini_frame, textvariable=self.gemini_api_key_var, width=50, show="*")
+        self.gemini_key_entry.grid(row=r, column=1, sticky="ew", pady=(0, 4))
+        self.show_gemini_key_var = tk.BooleanVar(value=False)
+        self.gemini_show_btn = ttk.Checkbutton(self.gemini_frame, text="Show", variable=self.show_gemini_key_var, command=self._toggle_gemini_key_visibility)
+        self.gemini_show_btn.grid(row=r, column=2, padx=(4, 0))
+        r += 1
+
+        ttk.Label(self.gemini_frame, text="Промпт:").grid(row=r, column=0, sticky="nw", pady=(0, 4))
+        self.gemini_prompt_text = tk.Text(self.gemini_frame, height=3, width=50, wrap="word")
+        self.gemini_prompt_text.grid(row=r, column=1, columnspan=2, sticky="ew", pady=(0, 4))
+        self.gemini_prompt_text.insert("1.0", config.GEMINI_PROMPT or DEFAULT_PROMPT)
+        r += 1
+
+        ttk.Label(self.gemini_frame, text="Модель:").grid(row=r, column=0, sticky="w", pady=(0, 4))
+        self.gemini_model_var = tk.StringVar(value=config.GEMINI_MODEL)
+        self.gemini_model_entry = ttk.Entry(self.gemini_frame, textvariable=self.gemini_model_var, width=30)
+        self.gemini_model_entry.grid(row=r, column=1, sticky="w", pady=(0, 4))
+        r += 1
+
+        ttk.Label(self.gemini_frame, text="Temperature:").grid(row=r, column=0, sticky="w", pady=(0, 4))
+        self.gemini_temperature_var = tk.StringVar(value=str(config.GEMINI_TEMPERATURE))
+        self.gemini_temperature_entry = ttk.Entry(self.gemini_frame, textvariable=self.gemini_temperature_var, width=10)
+        self.gemini_temperature_entry.grid(row=r, column=1, sticky="w", pady=(0, 4))
+
+        self.gemini_frame.grid(row=start_row, column=0, columnspan=3, sticky="ew")
+
     def _toggle_key_visibility(self):
         self.api_key_entry.configure(show="" if self.show_key_var.get() else "*")
 
     def _toggle_groq_key_visibility(self):
         self.groq_key_entry.configure(show="" if self.show_groq_key_var.get() else "*")
 
-    def _toggle_groq_fields(self):
-        state = "normal" if self.groq_enabled_var.get() else "disabled"
-        self.groq_key_entry.configure(state=state)
-        self.groq_prompt_text.configure(state=state)
-        self.groq_show_btn.configure(state=state)
-        self.groq_model_entry.configure(state=state)
-        self.groq_temperature_entry.configure(state=state)
+    def _toggle_gemini_key_visibility(self):
+        self.gemini_key_entry.configure(show="" if self.show_gemini_key_var.get() else "*")
+
+    def _toggle_provider_fields(self):
+        enabled = self.post_process_var.get()
+        provider = self.provider_var.get()
+
+        for w in [self.provider_label, self.provider_combo]:
+            w.configure(state="normal" if enabled else "disabled")
+
+        groq_state = "normal" if enabled and provider == "groq" else "disabled"
+        for w in [self.groq_key_entry, self.groq_prompt_text, self.groq_show_btn,
+                  self.groq_model_entry, self.groq_temperature_entry]:
+            w.configure(state=groq_state)
+
+        gemini_state = "normal" if enabled and provider == "gemini" else "disabled"
+        for w in [self.gemini_key_entry, self.gemini_prompt_text, self.gemini_show_btn,
+                  self.gemini_model_entry, self.gemini_temperature_entry]:
+            w.configure(state=gemini_state)
 
     def _save(self):
-        groq_enabled = self.groq_enabled_var.get()
+        enabled = self.post_process_var.get()
+        provider = self.provider_var.get() if enabled else ""
+
         settings = {
             "server_url": self.server_var.get().strip(),
             "language": self.language_var.get(),
@@ -149,11 +210,16 @@ class PreferencesDialog:
             "api_key": self.api_key_var.get().strip(),
             "log_level": self.log_level_var.get(),
             "initial_prompt": self.prompt_text.get("1.0", "end-1c").strip(),
-            "groq_post_process": groq_enabled,
-            "groq_api_key": self.groq_api_key_var.get().strip() if groq_enabled else "",
-            "groq_prompt": self.groq_prompt_text.get("1.0", "end-1c").strip() if groq_enabled else "",
-            "groq_model": self.groq_model_var.get().strip() if groq_enabled else "llama-3.3-70b-versatile",
-            "groq_temperature": float(self.groq_temperature_var.get().strip()) if groq_enabled else 0.2,
+            "post_process": enabled,
+            "post_process_provider": provider,
+            "groq_api_key": self.groq_api_key_var.get().strip() if provider == "groq" else "",
+            "groq_prompt": self.groq_prompt_text.get("1.0", "end-1c").strip() if provider == "groq" else "",
+            "groq_model": self.groq_model_var.get().strip() if provider == "groq" else "llama-3.3-70b-versatile",
+            "groq_temperature": float(self.groq_temperature_var.get().strip()) if provider == "groq" else 0.2,
+            "gemini_api_key": self.gemini_api_key_var.get().strip() if provider == "gemini" else "",
+            "gemini_prompt": self.gemini_prompt_text.get("1.0", "end-1c").strip() if provider == "gemini" else "",
+            "gemini_model": self.gemini_model_var.get().strip() if provider == "gemini" else "gemini-2.0-flash",
+            "gemini_temperature": float(self.gemini_temperature_var.get().strip()) if provider == "gemini" else 0.2,
         }
         config.save_settings(**settings)
         logger.info(f"Preferences saved")

@@ -300,15 +300,28 @@ class VoxClientDaemon:
         try:
             with ws_connect(config.SERVER_BASE_URL, timeout=self.connect_timeout) as ws:
                 # 1. Надсилаємо налаштування
+                provider = getattr(config, "POST_PROCESS_PROVIDER", "")
+                if provider == "gemini":
+                    pp_key = getattr(config, "GEMINI_API_KEY", "") or None
+                    pp_prompt = getattr(config, "GEMINI_PROMPT", "") or None
+                    pp_model = getattr(config, "GEMINI_MODEL", "") or None
+                    pp_temp = getattr(config, "GEMINI_TEMPERATURE", 0.2)
+                else:
+                    pp_key = getattr(config, "GROQ_API_KEY", "") or None
+                    pp_prompt = getattr(config, "GROQ_PROMPT", "") or None
+                    pp_model = getattr(config, "GROQ_MODEL", "") or None
+                    pp_temp = getattr(config, "GROQ_TEMPERATURE", 0.2)
+
                 ws.send(json.dumps({
                     "type": "start",
                     "language": self.language,
                     "api_key": getattr(config, "API_KEY", ""),
                     "initial_prompt": self.initial_prompt or getattr(config, "INITIAL_PROMPT", "") or None,
-                    "groq_api_key": getattr(config, "GROQ_API_KEY", "") or None,
-                    "groq_prompt": getattr(config, "GROQ_PROMPT", "") or None,
-                    "groq_model": getattr(config, "GROQ_MODEL", "") or None,
-                    "groq_temperature": getattr(config, "GROQ_TEMPERATURE", 0.2),
+                    "post_process_provider": provider or None,
+                    "post_process_api_key": pp_key,
+                    "post_process_prompt": pp_prompt,
+                    "post_process_model": pp_model,
+                    "post_process_temperature": pp_temp,
                 }))
 
                 logger.info("Recording audio (WebSocket)...")
